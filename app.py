@@ -495,7 +495,7 @@ def enrich_event(event: Dict, now_utc: datetime) -> Optional[Dict]:
             "date_display": event_time.strftime("%Y-%m-%d"),
             "time_display": event_time.strftime("%H:%M UTC"),
             "day_of_week": event_time.strftime("%A").upper(),
-            "impact": event.get("impact", "High"),
+            "impact": (event.get("impact") or "High").lower(),
             "forecast": event.get("forecast", "") or "—",
             "previous": event.get("previous", "") or "—",
             "actual": event.get("actual", "") or "—",
