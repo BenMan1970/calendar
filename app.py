@@ -653,7 +653,7 @@ with col_side:
     st.download_button(
         label="📥 DOWNLOAD calendar.json",
         data=json_str,
-        file_name=f"bluestar_calendar_{now_utc.strftime('%Y%m%d_%H%M')}.json",
+        file_name="calendar.json",
         mime="application/json",
         use_container_width=True
     )
