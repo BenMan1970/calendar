@@ -211,8 +211,10 @@ with st.sidebar:
 
 # ── FILTERS ──
 filtered = all_events.copy()
-if sel_ccy:  filtered = [e for e in filtered if e["currency"] in sel_ccy]
-if sel_sess: filtered = [e for e in filtered if e["session"] in sel_sess]
+if sel_ccy:
+    filtered = [e for e in filtered if e["currency"] in sel_ccy]
+if sel_sess:
+    filtered = [e for e in filtered if e["session"] in sel_sess]
 # FIX #1 (suite): Le filtre show_past contrôle la visibilité des passés, et
 # sel_prio s'applique uniformément à tous les événements sans exception.
 # On garde show_past comme garde-fou indépendant pour l'UX.
