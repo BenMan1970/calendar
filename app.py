@@ -106,7 +106,9 @@ def get_session(t: datetime) -> str:
     return "OFF"
 
 def fmt_until(h: float) -> str:
-    if h < 0: return "PASSED"
+    # FIX #3: h == 0.0 (event exactement maintenant) doit aussi retourner "PASSED"
+    # pour rester cohérent avec is_upcoming qui utilise h > 0
+    if h <= 0: return "PASSED"
     total_min = int(h * 60)
     hh, mm = divmod(total_min, 60)
     if hh == 0:    return f"{mm}m"
@@ -130,7 +132,7 @@ def enrich(event: Dict, now_utc: datetime) -> Optional[Dict]:
             t = pytz.UTC.localize(t)
         h    = (t - now_utc).total_seconds() / 3600
         ccy  = event.get("country","")
-        prio = ("PAST" if h <= 0 else
+        prio = ("PAST"     if h <= 0 else
                 "CRITICAL" if h <= 6 else
                 "HIGH"     if h <= 48 else "MEDIUM")
         return {
@@ -188,7 +190,10 @@ with st.sidebar:
     show_past = st.checkbox("Show past events", value=False)
 
     st.caption("PRIORITY")
-    sel_prio = st.multiselect("Priority", ["CRITICAL","HIGH","MEDIUM"],
+    # FIX #1: "PAST" est maintenant une option explicite dans le filtre priorité,
+    # cohérent avec la valeur assignée dans enrich(). Par défaut désélectionné
+    # pour ne pas afficher les passés quand show_past=False.
+    sel_prio = st.multiselect("Priority", ["CRITICAL","HIGH","MEDIUM","PAST"],
                               default=["CRITICAL","HIGH","MEDIUM"],
                               label_visibility="collapsed")
     st.divider()
@@ -196,11 +201,14 @@ with st.sidebar:
 
 # ── FILTERS ──
 filtered = all_events.copy()
-if sel_ccy:       filtered = [e for e in filtered if e["currency"] in sel_ccy]
-if sel_sess:      filtered = [e for e in filtered if e["session"] in sel_sess]
-if not show_past: filtered = [e for e in filtered if e["is_upcoming"]]
-filtered = [e for e in filtered
-            if e["priority"] in sel_prio or (not e["is_upcoming"] and show_past)]
+if sel_ccy:  filtered = [e for e in filtered if e["currency"] in sel_ccy]
+if sel_sess: filtered = [e for e in filtered if e["session"] in sel_sess]
+# FIX #1 (suite): Le filtre show_past contrôle la visibilité des passés, et
+# sel_prio s'applique uniformément à tous les événements sans exception.
+# On garde show_past comme garde-fou indépendant pour l'UX.
+if not show_past:
+    filtered = [e for e in filtered if e["is_upcoming"]]
+filtered = [e for e in filtered if e["priority"] in sel_prio]
 
 # ── SUMMARY BY DAY ──
 daily = defaultdict(list)
@@ -269,7 +277,10 @@ with col_side:
         mime="application/json",
         use_container_width=True,
     )
-    st.caption(f"{len(filtered)} events · {max(1,len(json_str)//1024)} KB")
+    # FIX #4: Affichage correct de la taille — "< 1 KB" si moins d'1 KB
+    kb = len(json_str) // 1024
+    size_str = f"{kb} KB" if kb > 0 else "< 1 KB"
+    st.caption(f"{len(filtered)} events · {size_str}")
 
     st.divider()
     st.caption("WEEKLY SUMMARY")
@@ -294,8 +305,13 @@ with col_main:
     if not filtered:
         st.info("No events match current filters.")
     else:
-        for day_key in sorted(days_grouped.keys(),
-                              key=lambda d: (not days_grouped[d][0]["is_upcoming"], d)):
+        # FIX #2: Tri stable basé sur l'ensemble du groupe (any upcoming),
+        # pas sur le seul premier élément qui peut être passé même si
+        # d'autres events du même jour sont upcoming.
+        for day_key in sorted(
+            days_grouped.keys(),
+            key=lambda d: (not any(e["is_upcoming"] for e in days_grouped[d]), d)
+        ):
             day_evs = days_grouped[day_key]
             dt      = datetime.fromisoformat(day_key)
             upcoming_ct = sum(1 for e in day_evs if e["is_upcoming"])
