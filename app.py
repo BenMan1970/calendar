@@ -1,11 +1,14 @@
-import streamlit as st
-import requests
+# stdlib
 import json
-from datetime import datetime
-from collections import defaultdict
-import pytz
-from typing import List, Dict, Optional
 import logging
+from collections import defaultdict
+from datetime import datetime
+from typing import Dict, List, Optional
+
+# third-party
+import pytz
+import requests
+import streamlit as st
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -99,20 +102,27 @@ PRIORITY_ICON = {"CRITICAL":"🔴","HIGH":"🟡","MEDIUM":"🔵","PAST":"⚫"}
 def get_session(t: datetime) -> str:
     h = t.hour
     london, ny = 7 <= h < 16, 13 <= h < 22
-    if london and ny: return "OVERLAP"
-    if london:        return "LONDON"
-    if ny:            return "NEW YORK"
-    if 0 <= h < 9:   return "ASIAN"
+    if london and ny:
+        return "OVERLAP"
+    if london:
+        return "LONDON"
+    if ny:
+        return "NEW YORK"
+    if 0 <= h < 9:
+        return "ASIAN"
     return "OFF"
 
 def fmt_until(h: float) -> str:
     # FIX #3: h == 0.0 (event exactement maintenant) doit aussi retourner "PASSED"
     # pour rester cohérent avec is_upcoming qui utilise h > 0
-    if h <= 0: return "PASSED"
+    if h <= 0:
+        return "PASSED"
     total_min = int(h * 60)
     hh, mm = divmod(total_min, 60)
-    if hh == 0:    return f"{mm}m"
-    if hh < 24:    return f"{hh}h {mm}m"
+    if hh == 0:
+        return f"{mm}m"
+    if hh < 24:
+        return f"{hh}h {mm}m"
     return f"{hh//24}d {hh%24}h"
 
 @st.cache_data(ttl=CACHE_TTL)
@@ -121,40 +131,40 @@ def fetch_raw() -> List[Dict]:
         r = requests.get(JSON_URL, timeout=15)
         r.raise_for_status()
         return r.json()
-    except Exception as e:
-        logger.error(f"Fetch failed: {e}")
+    except (requests.RequestException, ValueError) as e:
+        logger.error("Fetch failed: %s", e)
         return []
 
-def enrich(event: Dict, now_utc: datetime) -> Optional[Dict]:
+def enrich(event: Dict, event_time_ref: datetime) -> Optional[Dict]:
     try:
         t = datetime.fromisoformat(event.get("date","").replace("Z","+00:00"))
         if t.tzinfo is None:
             t = pytz.UTC.localize(t)
-        h    = (t - now_utc).total_seconds() / 3600
+        h    = (t - event_time_ref).total_seconds() / 3600
         ccy  = event.get("country","")
         prio = ("PAST"     if h <= 0 else
                 "CRITICAL" if h <= 6 else
                 "HIGH"     if h <= 48 else "MEDIUM")
         return {
-            "currency":          ccy,
-            "event_name":        event.get("title","").strip(),
-            "datetime_utc":      t.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "date_display":      t.strftime("%Y-%m-%d"),
-            "time_display":      t.strftime("%H:%M UTC"),
-            "day_of_week":       t.strftime("%A").upper(),
-            "impact":            (event.get("impact") or "High").lower(),
-            "forecast":          event.get("forecast","") or "—",
-            "previous":          event.get("previous","") or "—",
-            "actual":            event.get("actual","") or "—",
-            "hours_until":       round(h, 2),
+            "currency":            ccy,
+            "event_name":          event.get("title","").strip(),
+            "datetime_utc":        t.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "date_display":        t.strftime("%Y-%m-%d"),
+            "time_display":        t.strftime("%H:%M UTC"),
+            "day_of_week":         t.strftime("%A").upper(),
+            "impact":              (event.get("impact") or "High").lower(),
+            "forecast":            event.get("forecast","") or "—",
+            "previous":            event.get("previous","") or "—",
+            "actual":              event.get("actual","") or "—",
+            "hours_until":         round(h, 2),
             "hours_until_display": fmt_until(h),
-            "is_upcoming":       h > 0,
-            "priority":          prio,
-            "session":           get_session(t),
-            "pairs_affected":    PAIRS_MAP.get(ccy, []),
+            "is_upcoming":         h > 0,
+            "priority":            prio,
+            "session":             get_session(t),
+            "pairs_affected":      PAIRS_MAP.get(ccy, []),
         }
-    except Exception as e:
-        logger.warning(f"Skip: {e}")
+    except (ValueError, KeyError, AttributeError) as e:
+        logger.warning("Skip: %s", e)
         return None
 
 # ── DATA ──
@@ -214,7 +224,7 @@ filtered = [e for e in filtered if e["priority"] in sel_prio]
 daily = defaultdict(list)
 for ev in all_events:
     daily[ev["datetime_utc"][:10]].append(f"{ev['currency']} – {ev['event_name']}")
-summary_by_day = {d: evs for d, evs in sorted(daily.items())}
+summary_by_day = dict(sorted(daily.items()))
 
 # ── FINAL JSON ──
 final_json = {
