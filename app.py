@@ -228,6 +228,18 @@ for ev in all_events:
     daily[ev["datetime_utc"][:10]].append(f"{ev['currency']} – {ev['event_name']}")
 summary_by_day = dict(sorted(daily.items()))
 
+# ── EVENTS ENGINE (R4) ──
+# Champ dédié à ENGINE V10 : événements pertinents indépendants des filtres UI.
+# Inclut TOUJOURS :
+#   - les events futurs (is_upcoming=True)
+#   - les events passés dans la fenêtre de risque résiduel 72h (pour f7_macro)
+# N'est pas affecté par show_past, sel_ccy, sel_sess, sel_prio.
+# ENGINE lit "events_engine" en priorité, "events" en fallback.
+events_engine = [
+    e for e in all_events
+    if e["is_upcoming"] or e["hours_until"] >= -72
+]
+
 # ── FINAL JSON ──
 final_json = {
     "metadata": {
@@ -239,8 +251,10 @@ final_json = {
         "critical_count":    sum(1 for e in all_events if e["priority"] == "CRITICAL"),
         "filters_applied":   {"currencies": sel_ccy, "sessions": sel_sess,
                               "show_past": show_past},
+        "engine_events_count": len(events_engine),
     },
     "events":         filtered,
+    "events_engine":  events_engine,
     "summary_by_day": summary_by_day,
 }
 json_str = json.dumps(final_json, indent=2, ensure_ascii=False)
