@@ -209,6 +209,11 @@ with st.sidebar:
     st.divider()
     st.caption(f"LAST REFRESH\n{now_utc.strftime('%Y-%m-%d %H:%M UTC')}")
 
+    # NOUVEAU : Bouton pour forcer le vidage du cache en cas d'erreur API
+    if st.button("🔄 Vider le cache"):
+        st.cache_data.clear()
+        st.rerun()
+
 # ── FILTERS ──
 filtered = all_events.copy()
 if sel_ccy:
