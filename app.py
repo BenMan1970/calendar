@@ -140,6 +140,12 @@ def enrich(event: Dict, event_time_ref: datetime) -> Optional[Dict]:
         t = datetime.fromisoformat(event.get("date","").replace("Z","+00:00"))
         if t.tzinfo is None:
             t = pytz.UTC.localize(t)
+        else:
+            # ✅ FIX CRITIQUE : Conversion explicite en UTC absolu.
+            # Sans ça, t.strftime() et t.hour utilisent l'heure locale (ex: EDT)
+            # avec un "Z" à la fin, créant une incohérence avec hours_until.
+            t = t.astimezone(pytz.UTC)
+            
         h    = (t - event_time_ref).total_seconds() / 3600
         ccy  = event.get("country","")
         prio = ("PAST"     if h <= 0 else
