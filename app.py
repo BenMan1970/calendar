@@ -113,8 +113,6 @@ def get_session(t: datetime) -> str:
     return "OFF"
 
 def fmt_until(h: float) -> str:
-    # FIX #3: h == 0.0 (event exactement maintenant) doit aussi retourner "PASSED"
-    # pour rester cohérent avec is_upcoming qui utilise h > 0
     if h <= 0:
         return "PASSED"
     total_min = int(h * 60)
@@ -123,7 +121,9 @@ def fmt_until(h: float) -> str:
         return f"{mm}m"
     if hh < 24:
         return f"{hh}h {mm}m"
-    return f"{hh//24}d {hh%24}h"
+    # FIX: on garde les minutes au-delà de 24h (perdues avant : "1d 21h" au
+    # lieu de "1d 21h 27m"), pour la précision et la symétrie de format.
+    return f"{hh//24}d {hh%24}h {mm}m"
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_raw() -> List[Dict]:
@@ -141,11 +141,8 @@ def enrich(event: Dict, event_time_ref: datetime) -> Optional[Dict]:
         if t.tzinfo is None:
             t = pytz.UTC.localize(t)
         else:
-            # ✅ FIX CRITIQUE : Conversion explicite en UTC absolu.
-            # Sans ça, t.strftime() et t.hour utilisent l'heure locale (ex: EDT)
-            # avec un "Z" à la fin, créant une incohérence avec hours_until.
             t = t.astimezone(pytz.UTC)
-            
+
         h    = (t - event_time_ref).total_seconds() / 3600
         ccy  = event.get("country","")
         prio = ("PAST"     if h <= 0 else
@@ -206,16 +203,12 @@ with st.sidebar:
     show_past = st.checkbox("Show past events", value=False)
 
     st.caption("PRIORITY")
-    # FIX #1: "PAST" est maintenant une option explicite dans le filtre priorité,
-    # cohérent avec la valeur assignée dans enrich(). Par défaut désélectionné
-    # pour ne pas afficher les passés quand show_past=False.
     sel_prio = st.multiselect("Priority", ["CRITICAL","HIGH","MEDIUM","PAST"],
                               default=["CRITICAL","HIGH","MEDIUM"],
                               label_visibility="collapsed")
     st.divider()
     st.caption(f"LAST REFRESH\n{now_utc.strftime('%Y-%m-%d %H:%M UTC')}")
 
-    # NOUVEAU : Bouton pour forcer le vidage du cache en cas d'erreur API
     if st.button("🔄 Vider le cache"):
         st.cache_data.clear()
         st.rerun()
@@ -226,26 +219,20 @@ if sel_ccy:
     filtered = [e for e in filtered if e["currency"] in sel_ccy]
 if sel_sess:
     filtered = [e for e in filtered if e["session"] in sel_sess]
-# FIX #1 (suite): Le filtre show_past contrôle la visibilité des passés, et
-# sel_prio s'applique uniformément à tous les événements sans exception.
-# On garde show_past comme garde-fou indépendant pour l'UX.
 if not show_past:
     filtered = [e for e in filtered if e["is_upcoming"]]
 filtered = [e for e in filtered if e["priority"] in sel_prio]
 
 # ── SUMMARY BY DAY ──
+# FIX: construit à partir de 'filtered' (== champ "events" du JSON final) et
+# non de 'all_events', pour qu'un lecteur (LLM ou humain) ne voie jamais un
+# événement listé dans summary_by_day qui soit absent de "events".
 daily = defaultdict(list)
-for ev in all_events:
+for ev in filtered:
     daily[ev["datetime_utc"][:10]].append(f"{ev['currency']} – {ev['event_name']}")
 summary_by_day = dict(sorted(daily.items()))
 
 # ── EVENTS ENGINE (R4) ──
-# Champ dédié à ENGINE V10 : événements pertinents indépendants des filtres UI.
-# Inclut TOUJOURS :
-#   - les events futurs (is_upcoming=True)
-#   - les events passés dans la fenêtre de risque résiduel 72h (pour f7_macro)
-# N'est pas affecté par show_past, sel_ccy, sel_sess, sel_prio.
-# ENGINE lit "events_engine" en priorité, "events" en fallback.
 events_engine = [
     e for e in all_events
     if e["is_upcoming"] or e["hours_until"] >= -72
@@ -270,9 +257,6 @@ final_json = {
 }
 json_str = json.dumps(final_json, indent=2, ensure_ascii=False)
 
-# ══════════════════════════════════════════════
-# HEADER — safe single-block html
-# ══════════════════════════════════════════════
 st.markdown(
     f"<div style='background:#0d1117;border-top:2px solid #00d4ff;"
     f"border:1px solid #1e2d3d;padding:18px 24px 14px;margin-bottom:16px;'>"
@@ -284,7 +268,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# ── KPIs via native st.metric ──
 total    = len(all_events)
 upcoming = sum(1 for e in all_events if e["is_upcoming"])
 critical = sum(1 for e in all_events if e["priority"] == "CRITICAL")
@@ -299,12 +282,8 @@ k5.metric("🔍 FILTERED VIEW",  len(filtered))
 
 st.divider()
 
-# ── LAYOUT ──
 col_main, col_side = st.columns([4, 1])
 
-# ══════════════════════════════════════════════
-# EXPORT COLUMN
-# ══════════════════════════════════════════════
 with col_side:
     st.caption("EXPORT")
     st.download_button(
@@ -314,7 +293,6 @@ with col_side:
         mime="application/json",
         use_container_width=True,
     )
-    # FIX #4: Affichage correct de la taille — "< 1 KB" si moins d'1 KB
     kb = len(json_str) // 1024
     size_str = f"{kb} KB" if kb > 0 else "< 1 KB"
     st.caption(f"{len(filtered)} events · {size_str}")
@@ -330,9 +308,6 @@ with col_side:
         if len(evs) > 3:
             st.caption(f"  +{len(evs)-3} more")
 
-# ══════════════════════════════════════════════
-# EVENTS COLUMN  — 100% native Streamlit
-# ══════════════════════════════════════════════
 with col_main:
 
     days_grouped = defaultdict(list)
@@ -342,9 +317,6 @@ with col_main:
     if not filtered:
         st.info("No events match current filters.")
     else:
-        # FIX #2: Tri stable basé sur l'ensemble du groupe (any upcoming),
-        # pas sur le seul premier élément qui peut être passé même si
-        # d'autres events du même jour sont upcoming.
         for day_key in sorted(
             days_grouped.keys(),
             key=lambda d: (not any(e["is_upcoming"] for e in days_grouped[d]), d)
@@ -353,7 +325,6 @@ with col_main:
             dt      = datetime.fromisoformat(day_key)
             upcoming_ct = sum(1 for e in day_evs if e["is_upcoming"])
 
-            # ── Day header ──
             st.markdown(
                 f"#### 📅 {dt.strftime('%A, %B %d %Y').upper()}"
                 f"  <span style='font-size:11px;color:#4a6070;font-weight:400;'>"
@@ -383,7 +354,6 @@ with col_main:
                 if actual != "—":
                     fcst_line += f" · ✅ Actual **{actual}**"
 
-                # ── Card: 3-column native layout ──
                 with st.container():
                     c_time, c_info, c_pairs = st.columns([1, 3, 2])
 
@@ -405,7 +375,6 @@ with col_main:
 
                 st.divider()
 
-# ── JSON VIEWER ──
 with st.expander("🔍  VIEW FULL JSON — LLM READY"):
     st.code(json_str, language="json")
 
